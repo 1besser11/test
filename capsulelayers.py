@@ -49,7 +49,7 @@ class Mask(layers.Layer):
             x = K.sqrt(K.sum(K.square(inputs), -1))
             # generate the mask which is a one-hot code.
             # mask.shape=[None, n_classes]=[None, num_capsule]
-            mask = K.one_hot(indices=K.argmax(x, 1), num_classes=int(x.get_shape().as_list()[1]))
+            mask = K.one_hot(indices=K.argmax(x, 1), num_classes=x.get_shape().as_list()[1])
 
         # inputs.shape=[None, num_capsule, dim_capsule]
         # mask.shape=[None, num_capsule]
