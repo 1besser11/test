@@ -25,10 +25,6 @@ class Length(layers.Layer):
     def compute_output_shape(self, input_shape):
         return input_shape[:-1]
 
-    def get_config(self):
-        config = super(Length, self).get_config()
-        return config
-
 
 class Mask(layers.Layer):
     """
@@ -67,10 +63,6 @@ class Mask(layers.Layer):
         else:  # no true label provided
             return tuple([None, input_shape[1] * input_shape[2]])
 
-    def get_config(self):
-        config = super(Mask, self).get_config()
-        return config
-
 
 def squash(vectors, axis=-1):
     """
@@ -93,15 +85,15 @@ class CapsuleLayer(layers.Layer):
     
     :param num_capsule: number of capsules in this layer
     :param dim_capsule: dimension of the output vectors of the capsules in this layer
-    :param routings: number of iterations for the routing algorithm
+    :param num_routing: number of iterations for the routing algorithm
     """
-    def __init__(self, num_capsule, dim_capsule, routings=3,
+    def __init__(self, num_capsule, dim_capsule, num_routing=3,
                  kernel_initializer='glorot_uniform',
                  **kwargs):
         super(CapsuleLayer, self).__init__(**kwargs)
         self.num_capsule = num_capsule
         self.dim_capsule = dim_capsule
-        self.routings = routings
+        self.num_routing = num_routing
         self.kernel_initializer = initializers.get(kernel_initializer)
 
     def build(self, input_shape):
@@ -134,45 +126,63 @@ class CapsuleLayer(layers.Layer):
         # inputs_hat.shape = [None, num_capsule, input_num_capsule, dim_capsule]
         inputs_hat = K.map_fn(lambda x: K.batch_dot(x, self.W, [2, 3]), elems=inputs_tiled)
 
+        """
+        # Begin: routing algorithm V1, dynamic ------------------------------------------------------------#
+        # The prior for coupling coefficient, initialized as zeros.
+        b = K.zeros(shape=[self.batch_size, self.num_capsule, self.input_num_capsule])
+
+        def body(i, b, outputs):
+            c = tf.nn.softmax(b, dim=1)  # dim=2 is the num_capsule dimension
+            outputs = squash(K.batch_dot(c, inputs_hat, [2, 2]))
+            if i != 1:
+                b = b + K.batch_dot(outputs, inputs_hat, [2, 3])
+            return [i-1, b, outputs]
+
+        cond = lambda i, b, inputs_hat: i > 0
+        loop_vars = [K.constant(self.num_routing), b, K.sum(inputs_hat, 2, keepdims=False)]
+        shape_invariants = [tf.TensorShape([]),
+                            tf.TensorShape([None, self.num_capsule, self.input_num_capsule]),
+                            tf.TensorShape([None, self.num_capsule, self.dim_capsule])]
+        _, _, outputs = tf.while_loop(cond, body, loop_vars, shape_invariants)
+        # End: routing algorithm V1, dynamic ------------------------------------------------------------#
+        """
         # Begin: Routing algorithm ---------------------------------------------------------------------#
+        # In forward pass, `inputs_hat_stopped` = `inputs_hat`;
+        # In backward, no gradient can flow from `inputs_hat_stopped` back to `inputs_hat`.
+        inputs_hat_stopped = K.stop_gradient(inputs_hat)
+        
         # The prior for coupling coefficient, initialized as zeros.
         # b.shape = [None, self.num_capsule, self.input_num_capsule].
         b = tf.zeros(shape=[K.shape(inputs_hat)[0], self.num_capsule, self.input_num_capsule])
 
-        assert self.routings > 0, 'The routings should be > 0.'
-        for i in range(self.routings):
+        assert self.num_routing > 0, 'The num_routing should be > 0.'
+        for i in range(self.num_routing):
             # c.shape=[batch_size, num_capsule, input_num_capsule]
             c = tf.nn.softmax(b, dim=1)
 
-            # c.shape =  [batch_size, num_capsule, input_num_capsule]
-            # inputs_hat.shape=[None, num_capsule, input_num_capsule, dim_capsule]
-            # The first two dimensions as `batch` dimension,
-            # then matmal: [input_num_capsule] x [input_num_capsule, dim_capsule] -> [dim_capsule].
-            # outputs.shape=[None, num_capsule, dim_capsule]
-            outputs = squash(K.batch_dot(c, inputs_hat, [2, 2]))  # [None, 10, 16]
+            # At last iteration, use `inputs_hat` to compute `outputs` in order to backpropagate gradient
+            if i == self.num_routing - 1:
+                # c.shape =  [batch_size, num_capsule, input_num_capsule]
+                # inputs_hat.shape=[None, num_capsule, input_num_capsule, dim_capsule]
+                # The first two dimensions as `batch` dimension,
+                # then matmal: [input_num_capsule] x [input_num_capsule, dim_capsule] -> [dim_capsule].
+                # outputs.shape=[None, num_capsule, dim_capsule]
+                outputs = squash(K.batch_dot(c, inputs_hat, [2, 2]))  # [None, 10, 16]
+            else:  # Otherwise, use `inputs_hat_stopped` to update `b`. No gradients flow on this path.
+                outputs = squash(K.batch_dot(c, inputs_hat_stopped, [2, 2]))
 
-            if i < self.routings - 1:
                 # outputs.shape =  [None, num_capsule, dim_capsule]
                 # inputs_hat.shape=[None, num_capsule, input_num_capsule, dim_capsule]
                 # The first two dimensions as `batch` dimension,
                 # then matmal: [dim_capsule] x [input_num_capsule, dim_capsule]^T -> [input_num_capsule].
                 # b.shape=[batch_size, num_capsule, input_num_capsule]
-                b += K.batch_dot(outputs, inputs_hat, [2, 3])
+                b += K.batch_dot(outputs, inputs_hat_stopped, [2, 3])
         # End: Routing algorithm -----------------------------------------------------------------------#
 
         return outputs
 
     def compute_output_shape(self, input_shape):
         return tuple([None, self.num_capsule, self.dim_capsule])
-
-    def get_config(self):
-        config = {
-            'num_capsule': self.num_capsule,
-            'dim_capsule': self.dim_capsule,
-            'routings': self.routings
-        }
-        base_config = super(CapsuleLayer, self).get_config()
-        return dict(list(base_config.items()) + list(config.items()))
 
 
 def PrimaryCap(inputs, dim_capsule, n_channels, kernel_size, strides, padding):
