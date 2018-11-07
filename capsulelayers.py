@@ -98,8 +98,8 @@ class CapsuleLayer(layers.Layer):
 
     def build(self, input_shape):
         assert len(input_shape) >= 3, "The input Tensor should have shape=[None, input_num_capsule, input_dim_capsule]"
-        self.input_num_capsule = input_shape[1]
-        self.input_dim_capsule = input_shape[2]
+        self.input_num_capsule = int(input_shape[1])
+        self.input_dim_capsule = int(input_shape[2])
 
         # Transform matrix
         self.W = self.add_weight(shape=[self.num_capsule, self.input_num_capsule,
