@@ -112,7 +112,7 @@ class CapsuleLayer(layers.Layer):
     def call(self, inputs, training=None):
         # inputs.shape=[None, input_num_capsule, input_dim_capsule]
         # inputs_expand.shape=[None, 1, input_num_capsule, input_dim_capsule]
-        inputs_expand = K.expand_dims(inputs, 1)
+        inputs_expand = K.expand_dims(int(inputs), 1)
 
         # Replicate num_capsule dimension to prepare being multiplied by W
         # inputs_tiled.shape=[None, num_capsule, input_num_capsule, input_dim_capsule]
