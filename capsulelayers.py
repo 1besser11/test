@@ -7,7 +7,7 @@ uncommenting them and commenting their counterparts.
 Author: Xifeng Guo, E-mail: `guoxifeng1990@163.com`, Github: `https://github.com/XifengGuo/CapsNet-Keras`
 """
 
-import keras.backend as K
+import tensorflow.keras.backend as K
 import tensorflow as tf
 from keras import initializers, layers
 
